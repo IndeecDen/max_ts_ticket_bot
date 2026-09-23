@@ -1,0 +1,1 @@
+"""Independent MAX support bot."""

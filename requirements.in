@@ -1,0 +1,4 @@
+aiohttp>=3.10,<4
+python-dotenv>=1,<2
+tzdata>=2025.1
+openpyxl>=3.1,<4

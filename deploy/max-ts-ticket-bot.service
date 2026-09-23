@@ -1,0 +1,32 @@
+# Managed by max-ts-ticket-bot installer
+[Unit]
+Description=MAX technical support ticket bot
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=max-ts-ticket-bot
+Group=max-ts-ticket-bot
+WorkingDirectory=/opt/max-ts-ticket-bot
+ExecStart=/opt/max-ts-ticket-bot/.venv/bin/python -m app.main run --profile /etc/max-ts-ticket-bot/config.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=150
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=max-ts-ticket-bot
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/max-ts-ticket-bot
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

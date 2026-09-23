@@ -1,0 +1,12 @@
+# Managed by max-ts-ticket-bot backup installer
+[Unit]
+Description=Daily backup of MAX ticket bot
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=max-ts-ticket-bot-backup.service
+
+[Install]
+WantedBy=timers.target
