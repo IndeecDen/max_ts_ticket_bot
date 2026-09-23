@@ -45,11 +45,12 @@ class InstallationTests(unittest.TestCase):
             self.assertNotIn('SECRET',str(error.exception))
 
     def test_wizard_collects_and_generates_secret_without_echo(self):
-        answers=iter(['-30','-20,-21','77','99','','','','','','','https://example.org/webhook/max'])
+        answers=iter(['-30','77','99','','','','','','','https://example.org/webhook/max'])
         secrets=iter(['TOKEN',''])
         prompts=[]
         data=collect(lambda prompt:(prompts.append(prompt),next(answers))[1],lambda prompt:next(secrets))
-        self.assertEqual(data['policy']['client_chats'],[-20,-21])
+        self.assertEqual(data['policy']['client_chats'],[])
+        self.assertTrue(data['policy']['auto_client_chats'])
         self.assertEqual(data['environment']['MAX_BOT_TOKEN'],'TOKEN')
         self.assertGreaterEqual(len(data['environment']['WEBHOOK_SECRET']),32)
         self.assertNotIn('TOKEN',''.join(prompts))

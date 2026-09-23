@@ -14,7 +14,7 @@ def request_id(raw):
 
 def handle(conn, event_id, actor, chat, text, received_at, policy):
     if chat != policy.work_chat:
-        return 'deferred_command' if chat in policy.client_chats else 'ignored_chat'
+        return 'deferred_command' if policy.is_client(chat) else 'ignored_chat'
     if not has_role(conn, actor, 'admin'):
         return 'forbidden_management'
     parts = text.split()

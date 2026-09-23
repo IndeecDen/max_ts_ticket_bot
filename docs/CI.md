@@ -1,6 +1,6 @@
 # Автоматические проверки GitHub
 
-Workflow `.github/workflows/ci.yml` запускается на push, pull request и вручную через вкладку Actions. Для запуска нужно разместить проект в GitHub-репозитории с включёнными Actions. Публикация репозитория из этой рабочей папки пока не выполнялась.
+Workflow `.github/workflows/ci.yml` запускается на push, pull request и вручную через вкладку Actions. Код размещён в ветке `release/1.0.1-candidate` репозитория [IndeecDen/max_ts_ticket_bot](https://github.com/IndeecDen/max_ts_ticket_bot). Первый запуск на 214 тестах прошёл во всех четырёх сочетаниях ОС/Python; результаты новых изменений проверяйте в Actions.
 
 Матрица запускает полный `unittest` на Python 3.12 и 3.13 в Ubuntu 24.04 и Windows. Зависимости берутся из `requirements.txt`, после установки выполняется `pip check`. Незакрытые ресурсы проверяются с `-W error::ResourceWarning`.
 

@@ -11,7 +11,7 @@ LABELS = {'waiting':'Ожидает ответа', 'new':'Без исполни�
 
 
 def handle(conn, key, actor, chat, text, policy):
-    if chat != policy.work_chat and chat not in policy.client_chats:
+    if chat != policy.work_chat and not policy.is_client(chat):
         return 'ignored_chat'
     admin = has_role(conn, actor, 'admin')
     staff = admin or has_role(conn, actor, 'specialist')

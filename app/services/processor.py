@@ -28,13 +28,19 @@ class ProcessingPolicy:
     timeout_seconds: int = 300
     admins: frozenset[int] = frozenset()
     timezone: str = 'Europe/Moscow'
+    auto_client_chats: bool = False
+
+    def is_client(self, chat):
+        return valid_id(chat) and chat != self.work_chat and (self.auto_client_chats or chat in self.client_chats)
 
     def __post_init__(self):
         try:
             ZoneInfo(self.timezone)
         except (ValueError, ZoneInfoNotFoundError):
             raise ConfigError('Некорректный часовой пояс статистики.') from None
-        if not self.client_chats:
+        if type(self.auto_client_chats) is not bool:
+            raise ConfigError('Автоматический выбор чатов должен быть boolean.')
+        if not self.client_chats and not self.auto_client_chats:
             raise ConfigError('Задайте клиентские чаты для обработки.')
         if not all(valid_id(x) for x in (*self.client_chats, *self.specialists, *self.admins, self.work_chat)):
             raise ConfigError('ID должны быть ненулевыми целыми числами int64.')
@@ -102,6 +108,8 @@ class InboxProcessor:
         user, chat = sender.get('user_id'), recipient.get('chat_id')
         if not valid_id(user) or not valid_id(chat):
             return 'invalid_id'
+        if self.policy.auto_client_chats and chat != self.policy.work_chat and recipient.get('chat_type') != 'chat':
+            return 'ignored_chat'
         # Missing bot flag is not assumed to mean a human.
         if sender.get('is_bot') is not False:
             return 'ignored_bot_or_unknown_sender'
@@ -124,7 +132,7 @@ class InboxProcessor:
             if text.split()[0] in ('/set_notice', '/get_notice', '/del_notice'):
                 return self._notices(conn, event_id, user, chat, text, received_at)
             return self._management(conn, event_id, user, chat, text, received_at)
-        if chat not in self.policy.client_chats:
+        if not self.policy.is_client(chat):
             return 'ignored_chat'
         if text.lstrip().startswith('/'):
             return 'deferred_command'
@@ -194,7 +202,7 @@ class InboxProcessor:
         if action in ('take', 'done'):
             if not has_role(conn, actor, 'specialist') or chat != self.policy.work_chat:
                 return 'forbidden_callback'
-        elif actor != author or chat != client_chat or chat not in self.policy.client_chats:
+        elif actor != author or chat != client_chat or not self.policy.is_client(chat):
             return 'forbidden_callback'
         now = int(datetime.fromisoformat(received_at).timestamp() * 1000)
         if action == 'take' and status == 'new':

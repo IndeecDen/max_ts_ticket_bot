@@ -24,7 +24,6 @@ def collect(ask=input, secret=getpass.getpass):
         return result
     token=secret('MAX-токен (ввод скрыт): ').strip()
     work=value('ID рабочего чата')
-    clients=ids('ID клиентских чатов через запятую',True)
     admins=ids('MAX ID начальных администраторов через запятую',True)
     specialists=ids('MAX ID начальных специалистов (можно пусто)')
     tz=value('Часовой пояс','Europe/Moscow')
@@ -44,7 +43,7 @@ def collect(ask=input, secret=getpass.getpass):
         'WEBHOOK_SECRET':webhook,'TIMEZONE':tz,'DATABASE_PATH':'/var/lib/max-ts-ticket-bot/max_bot.db',
         'LISTEN_HOST':'127.0.0.1','LISTEN_PORT':port,'HTTP_TIMEOUT_SECONDS':api_timeout,
         'MAX_API_BASE_URL':'https://platform-api2.max.ru','MAX_CA_BUNDLE':ca,'LOG_LEVEL':'INFO'},
-        'policy':{'client_chats':clients,'admins':admins,'specialists':specialists,'timeout_seconds':seconds},
+        'policy':{'auto_client_chats':True,'client_chats':[],'admins':admins,'specialists':specialists,'timeout_seconds':seconds},
         'public_webhook_url':public}
     validate(profile)
     return profile

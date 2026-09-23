@@ -54,7 +54,7 @@ def pages(fragments, limit=3000):
 
 
 def handle(conn, event_id, actor, chat, text, policy):
-    if chat != policy.work_chat and chat not in policy.client_chats:
+    if chat != policy.work_chat and not policy.is_client(chat):
         return 'ignored_chat'
     try:
         parts = text.split()

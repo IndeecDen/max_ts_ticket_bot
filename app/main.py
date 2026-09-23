@@ -105,7 +105,8 @@ async def deliver_outbox(settings, status_only=False):
 
 async def process_inbox(settings, args):
     policy = ProcessingPolicy(frozenset(args.client_chat), frozenset(args.specialist),
-                              settings.work_chat_id, args.timeout, frozenset(args.bot_admin), settings.timezone)
+                              settings.work_chat_id, args.timeout, frozenset(args.bot_admin), settings.timezone,
+                              args.auto_client_chats or not args.client_chat)
     store = InboxStore(settings.database_path)
     await store.initialize()
     result = await InboxProcessor(store, policy).tick()
@@ -140,6 +141,7 @@ def main(argv=None):
                                           'settings-show', 'timeout-set', 'ignore-add', 'ignore-remove', 'stats'))
     parser.add_argument('--profile', type=Path, help='JSON-профиль службы вместо .env и флагов чатов/ролей')
     parser.add_argument('--client-chat', action='append', type=int, default=[])
+    parser.add_argument('--auto-client-chats', action='store_true', help='Все групповые чаты, кроме рабочего; по умолчанию без --client-chat')
     parser.add_argument('--specialist', action='append', type=int, default=[])
     parser.add_argument('--bot-admin', action='append', type=int, default=[])
     parser.add_argument('--user-id', type=int)
@@ -161,11 +163,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.profile:
-            if args.client_chat or args.specialist or args.bot_admin or args.timeout != 300:
+            if args.client_chat or args.auto_client_chats or args.specialist or args.bot_admin or args.timeout != 300:
                 raise ConfigError('Не сочетайте --profile с флагами чатов, начальных ролей и таймаута.')
             from app.service_profile import load_profile
             settings, saved_policy = load_profile(args.profile)
             args.client_chat = list(saved_policy.client_chats)
+            args.auto_client_chats = saved_policy.auto_client_chats
             args.specialist = list(saved_policy.specialists)
             args.bot_admin = list(saved_policy.admins)
             args.timeout = saved_policy.timeout_seconds
@@ -185,7 +188,8 @@ def main(argv=None):
             return asyncio.run(process_inbox(settings, args))
         if args.command in ('serve', 'run'):
             policy = (ProcessingPolicy(frozenset(args.client_chat), frozenset(args.specialist),
-                                       settings.work_chat_id, args.timeout, frozenset(args.bot_admin), settings.timezone) if args.command == 'run' else None)
+                                       settings.work_chat_id, args.timeout, frozenset(args.bot_admin), settings.timezone,
+                                       args.auto_client_chats or not args.client_chat) if args.command == 'run' else None)
             application = create_app(settings, policy=policy)
             logging.basicConfig(level=settings.log_level,
                                 format='%(asctime)s %(levelname)s %(name)s: %(message)s')
