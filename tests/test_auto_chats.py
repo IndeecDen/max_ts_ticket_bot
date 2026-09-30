@@ -47,7 +47,7 @@ class AutoChatsTests(unittest.IsolatedAsyncioTestCase):
     async def test_menu_request_view_and_ownership_in_new_chat(self):
         await self.message(-111)
         await self.message(-111,text='/menu')
-        self.assertEqual(self.rows('inbox_events')[-1]['outcome'],'navigation_done')
+        self.assertEqual(self.rows('inbox_events')[-1]['outcome'],'private_menu_only')
         await self.message(-111,text='/request 1')
         self.assertIn('Помогите', self.rows('outbox')[-1]['text'])
         await self.message(-222,text='/request 1')

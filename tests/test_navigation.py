@@ -45,16 +45,32 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Чат: -20', reply['text'])
             self.assertEqual(reply['text_format'], 'html')
 
-    async def click(self, payload='nav:open_requests', actor=99, chat=-30, mid='menu-mid', callback_id='cb'):
+    async def click(self, payload='nav:open_requests', actor=77, chat=700, mid='menu-mid', callback_id='cb'):
         await self.store.save(IncomingEvent.parse({'update_type':'message_callback','timestamp':1,
             'callback':{'callback_id':callback_id,'payload':payload,'user':{'user_id':actor,'is_bot':False}},
-            'message':{'recipient':{'chat_id':chat},'body':{'mid':mid}}}))
+            'message':{'recipient':{'chat_id':chat,'chat_type':'dialog'},'body':{'mid':mid}}}))
         await self.processor.tick(now_ms=0)
 
     async def menu(self):
-        await self.command('/menu', actor=99)
+        await self.private_command('/menu')
         with self.store.connect() as conn:
             conn.execute("UPDATE outbox SET message_id='menu-mid',state='sent' WHERE destination LIKE 'navigation:%'")
+
+    async def private_command(self, text, actor=77, mid='private-menu'):
+        await self.store.save(IncomingEvent.parse({'update_type':'message_created','timestamp':1,
+            'message':{'sender':{'user_id':actor,'is_bot':False},
+                'recipient':{'chat_id':700,'chat_type':'dialog'},'body':{'mid':mid,'text':text}}}))
+        await self.processor.tick(now_ms=0)
+
+    async def test_menu_only_in_admin_private_dialog(self):
+        await self.command('/menu', actor=77)
+        await self.command('/menu', actor=77, chat=-20, mid='client-menu')
+        await self.private_command('/menu', actor=99, mid='non-admin')
+        self.assertEqual(self.replies(), [])
+        await self.private_command('/menu')
+        self.assertTrue(json.loads(self.replies()[-1]['attachments_json']))
+        await self.private_command('/get_timeout', mid='private-setting')
+        self.assertEqual(self.rows('inbox_events')[-1]['outcome'], 'management_done')
 
     async def test_client_lists_only_own_requests_in_current_chat(self):
         own = self.add()
@@ -114,10 +130,10 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.replies()),before+1)
         self.assertEqual(len([r for r in self.rows('outbox') if r['callback_id']=='cb']),1)
         with self.store.connect() as conn:
-            conn.execute("DELETE FROM bot_roles WHERE user_id=99")
+            conn.execute("DELETE FROM bot_roles WHERE user_id=77")
         await self.click(callback_id='revoked')
-        self.assertEqual(self.rows('inbox_events')[-1]['outcome'],'navigation_rejected')
-        self.assertNotIn('#1 ·', self.replies()[-1]['text'])
+        self.assertEqual(self.rows('inbox_events')[-1]['outcome'],'private_menu_only')
+        self.assertEqual(len(self.replies()),before+1)
 
     async def test_menu_delivery_and_client_help_does_not_create_or_cancel_request(self):
         request_id=self.add(status='waiting')
@@ -130,7 +146,7 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
         client.send_message.return_value='help-mid'
         self.assertEqual(await DeliveryQueue(self.store).deliver_one(client,lambda:1),'sent')
         attachments=client.send_message.call_args.args[2]
-        self.assertEqual(attachments[0]['type'],'inline_keyboard')
+        self.assertEqual(attachments, [])
         await self.command('/help',actor=99,chat=-20,mid='staffhelp')
         self.assertEqual(self.rows('requests')[0]['status'],'waiting')
         await self.command('/whoami',actor=77,mid='who')

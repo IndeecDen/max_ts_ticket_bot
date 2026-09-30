@@ -112,7 +112,10 @@ class InboxProcessor:
         user, chat = sender.get('user_id'), recipient.get('chat_id')
         if not valid_id(user) or not valid_id(chat):
             return 'invalid_id'
-        if self.policy.auto_client_chats and chat != self.policy.work_chat and recipient.get('chat_type') != 'chat':
+        private_admin = recipient.get('chat_type') == 'dialog' and has_role(conn, user, 'admin')
+        if recipient.get('chat_type') == 'dialog' and not private_admin:
+            return 'ignored_private_dialog'
+        if self.policy.auto_client_chats and chat != self.policy.work_chat and recipient.get('chat_type') != 'chat' and not private_admin:
             return 'ignored_chat'
         # Missing bot flag is not assumed to mean a human.
         if sender.get('is_bot') is not False:
@@ -124,18 +127,24 @@ class InboxProcessor:
         text = body.get('text') or ''
         if not isinstance(text, str):
             return 'invalid_text'
+        command_policy = self.policy
+        if private_admin:
+            from dataclasses import replace
+            command_policy = replace(self.policy, work_chat=chat, client_chats=self.policy.client_chats - {chat})
         if text.split() and text.split()[0] in admin_requests.COMMANDS:
-            return admin_requests.handle(conn, event_id, user, chat, text, received_at, self.policy)
+            return admin_requests.handle(conn, event_id, user, chat, text, received_at, command_policy)
         if text.split() and text.split()[0] == '/request':
-            return request_view.handle(conn, event_id, user, chat, text, self.policy)
+            return request_view.handle(conn, event_id, user, chat, text, command_policy)
         if text.split() and text.split()[0] in navigation.COMMANDS:
-            return navigation.handle(conn, str(event_id), user, chat, text, self.policy)
-        if chat == self.policy.work_chat and text.lstrip().startswith('/'):
+            return navigation.handle(conn, str(event_id), user, chat, text, command_policy, private_admin=private_admin)
+        if (chat == self.policy.work_chat or private_admin) and text.lstrip().startswith('/'):
             if text.split()[0] in ('/stats', '/my_stats', '/stats_xlsx', '/my_stats_xlsx'):
                 return self._statistics(conn, event_id, user, chat, text, received_at)
             if text.split()[0] in ('/set_notice', '/get_notice', '/del_notice'):
                 return self._notices(conn, event_id, user, chat, text, received_at)
             return self._management(conn, event_id, user, chat, text, received_at)
+        if private_admin:
+            return 'ignored_private_text'
         if not self.policy.is_client(chat):
             return 'ignored_chat'
         if text.lstrip().startswith('/'):

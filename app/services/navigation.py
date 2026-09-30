@@ -12,7 +12,7 @@ LABELS = {'waiting':'Ожидает ответа', 'new':'Без исполни�
           'closed':'Завершена', 'cancelled':'Отменена'}
 
 
-def handle(conn, key, actor, chat, text, policy):
+def handle(conn, key, actor, chat, text, policy, *, private_admin=False):
     if chat != policy.work_chat and not policy.is_client(chat):
         return 'ignored_chat'
     admin = has_role(conn, actor, 'admin')
@@ -20,6 +20,8 @@ def handle(conn, key, actor, chat, text, policy):
     work = chat == policy.work_chat
     parts = text.split()
     command = parts[0]
+    if command == '/menu' and not private_admin:
+        return 'private_menu_only'
     attachments = []
     outcome = 'navigation_done'
     formatted = False
@@ -33,7 +35,7 @@ def handle(conn, key, actor, chat, text, policy):
                 reply = f"Ваш MAX ID: {actor}\nID чата: {chat}\nРоли бота: {', '.join(roles) or 'клиент'}."
             else:
                 reply = ('Бот технической поддержки MAX.\n'
-                         '/menu — меню; /help — помощь; /whoami — ваши ID и роли.\n')
+                         '/menu — меню администратора в личном диалоге; /help — помощь; /whoami — ваши ID и роли.\n')
                 buttons = [('Мои ID', 'whoami'), ('Помощь', 'help')]
                 if not work:
                     reply += ('Отправьте описание проблемы обычным сообщением. После ожидания ответа сотрудника '
@@ -58,8 +60,9 @@ def handle(conn, key, actor, chat, text, policy):
                     reply += 'Рабочие списки доступны специалистам и администраторам бота.'
                 if not work or staff:
                     reply += '\n/request <номер> [страница] — полный сохранённый текст обращения.'
-                attachments = [{'type':'inline_keyboard','payload':{'buttons':[
-                    [{'type':'callback','text':label,'payload':'nav:'+name}] for label, name in buttons]}}]
+                if private_admin:
+                    attachments = [{'type':'inline_keyboard','payload':{'buttons':[
+                        [{'type':'callback','text':label,'payload':'nav:'+name}] for label, name in buttons]}}]
         else:
             if command == '/my_requests':
                 if work:
@@ -138,6 +141,8 @@ def callback(conn, event, policy):
     chat, mid, actor = recipient.get('chat_id'), body.get('mid'), user['user_id']
     if type(chat) is not int or not isinstance(mid, str):
         return 'invalid_navigation_callback'
+    if recipient.get('chat_type') != 'dialog' or not has_role(conn, actor, 'admin'):
+        return 'private_menu_only'
     # Bind buttons to an actual menu sent for this user and this chat.
     menu = conn.execute('''SELECT attachments_json FROM outbox WHERE message_id=? AND chat_id=?
         AND menu_owner=? AND deleted_at_ms IS NULL AND destination LIKE 'navigation:%' LIMIT 1''',
@@ -149,6 +154,8 @@ def callback(conn, event, policy):
                for row in attachment.get('payload', {}).get('buttons', []) for button in row]
     if not any(button.get('payload') == payload for button in buttons):
         return 'unknown_navigation_action'
+    from dataclasses import replace
+    policy = replace(policy, work_chat=chat, client_chats=policy.client_chats - {chat})
     conn.execute('''INSERT INTO outbox(request_id,destination,chat_id,text,callback_id)
         VALUES (0,?,?,'',?)''', ('answer:'+data['callback_id'], chat, data['callback_id']))
-    return handle(conn, 'callback:'+data['callback_id'], actor, chat, CALLBACKS[payload], policy)
+    return handle(conn, 'callback:'+data['callback_id'], actor, chat, CALLBACKS[payload], policy, private_admin=True)
