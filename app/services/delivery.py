@@ -1,6 +1,8 @@
 """Transactional queue with conservative handling of ambiguous POST results."""
 import asyncio
 import json
+import html
+from urllib.parse import urlsplit
 import sqlite3
 import time
 import tempfile
@@ -17,6 +19,31 @@ def clip(text, limit=3900):
     if len(raw) <= limit * 2:
         return text
     return raw[:(limit - 1) * 2].decode('utf-16-le', errors='ignore') + '…'
+
+
+def render_work_card(text, author_id, chat_info):
+    lines = text.split('\n')
+    if len(lines) < 4:
+        return html.escape(text)
+    author = lines[1].removeprefix('Автор: ')
+    title = chat_info.get('title') or lines[2].removeprefix('Чат: ')
+    url = chat_info.get('link')
+    try:
+        parsed = urlsplit(url) if isinstance(url, str) else None
+        safe = parsed and parsed.scheme == 'https' and parsed.hostname == 'max.ru' and not parsed.username and not parsed.password and len(url) < 512
+    except ValueError:
+        safe = False
+    title = html.escape(str(title)[:200])
+    chat = f'<a href="{html.escape(url, quote=True)}">{title}</a>' if safe else title
+    header = f'{html.escape(lines[0])}\nАвтор: <a href="max://user/{author_id}">{html.escape(author[:200])}</a>\nЧат: {chat}\n'
+    body = ''
+    for char in '\n'.join(lines[3:]):
+        escaped = html.escape(char)
+        if len((header + body + escaped).encode('utf-16-le')) // 2 > 3899:
+            body += '…'
+            break
+        body += escaped
+    return header + body
 
 
 def enqueue_cards(conn, work_chat, *, now_ms=None, timezone="Europe/Moscow"):
@@ -76,6 +103,7 @@ class DeliveryQueue:
     def __init__(self, store):
         self.store = store
         self.active_jobs = set()
+        self.chat_cache = {}
 
     def _claim(self, now):
         lock = None
@@ -173,6 +201,22 @@ class DeliveryQueue:
                     return 'pending'
                 attachments = ([{'type': 'file', 'payload': {'token': job['file_token']}}]
                                if job['report_json'] else json.loads(job['attachments_json']))
+                text, formatting = job['text'], {}
+                if job['destination'] == 'work' and job['request_id'] and callable(getattr(client, 'get_chat', None)):
+                    with self.store.connect() as conn:
+                        source = conn.execute('SELECT chat_id,user_id FROM requests WHERE id=?', (job['request_id'],)).fetchone()
+                    if source:
+                        info = self.chat_cache.get(source[0])
+                        if info is None:
+                            try:
+                                info = await client.get_chat(source[0])
+                            except MaxAPIError:
+                                info = {}
+                            if isinstance(info, dict) and info:
+                                self.chat_cache[source[0]] = info
+                        if isinstance(info, dict):
+                            text = render_work_card(text, source[1], info)
+                            formatting = {'format': 'html'}
                 if job['delete_mid']:
                     await client.delete_message(job['delete_mid'])
                     mid = None
@@ -180,11 +224,11 @@ class DeliveryQueue:
                     await client.answer_callback(job['callback_id'])
                     mid = None
                 elif job['message_id']:
-                    mid = await client.edit_message(job['message_id'], job['text'], attachments)
+                    mid = await client.edit_message(job['message_id'], text, attachments, **formatting)
                 elif job['forward_mid']:
                     mid = await client.send_message(job['chat_id'], job['text'], forward_mid=job['forward_mid'])
                 else:
-                    mid = await client.send_message(job['chat_id'], job['text'], attachments)
+                    mid = await client.send_message(job['chat_id'], text, attachments, **formatting)
             except MaxAPIError as exc:
                 state = 'uncertain' if exc.uncertain else ('pending' if exc.retryable else 'failed')
                 if state == 'pending' and job['attempts'] >= 10:

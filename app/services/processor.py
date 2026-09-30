@@ -200,7 +200,7 @@ class InboxProcessor:
             return 'stale_callback'
         actor = user['user_id']
         if action in ('take', 'done'):
-            if not has_role(conn, actor, 'specialist') or chat != self.policy.work_chat:
+            if not (has_role(conn, actor, 'specialist') or has_role(conn, actor, 'admin')) or chat != self.policy.work_chat:
                 return 'forbidden_callback'
         elif actor != author or chat != client_chat or not self.policy.is_client(chat):
             return 'forbidden_callback'

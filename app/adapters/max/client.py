@@ -134,7 +134,7 @@ class MaxClient:
         except (asyncio.TimeoutError, aiohttp.ClientError):
             raise MaxAPIError('Не удалось загрузить файл в MAX.', retryable=True) from None
 
-    async def send_message(self, chat_id, text, attachments=None, *, forward_mid=None):
+    async def send_message(self, chat_id, text, attachments=None, *, forward_mid=None, format=None):
         chat = self._chat_id(chat_id)
         if not isinstance(text, str) or not text or len(text.encode('utf-16-le')) // 2 > 4000:
             raise ValueError('Текст карточки должен содержать от 1 до 4000 символов UTF-16.')
@@ -142,8 +142,9 @@ class MaxClient:
             raise ValueError('Некорректный ID исходного сообщения.')
         payload = await self._request('POST', '/messages',
                                       params={'chat_id': chat, 'disable_link_preview': 'true'},
-                                      json={'text': text, **({'attachments': attachments} if attachments is not None else {}),
-                                            **({'link': {'type': 'forward', 'mid': forward_mid}} if forward_mid is not None else {})})
+                                      json={'text': '' if forward_mid is not None else text, **({'attachments': attachments} if attachments is not None else {}),
+                                            **({'link': {'type': 'forward', 'mid': forward_mid}} if forward_mid is not None else {}),
+                                            **({'format': format} if format else {})})
         message = payload.get('message')
         body = message.get('body') if isinstance(message, dict) else None
         mid = body.get('mid') if isinstance(body, dict) else None
@@ -151,11 +152,11 @@ class MaxClient:
             raise MaxAPIError('MAX не вернул ID отправленного сообщения.', uncertain=True)
         return mid
 
-    async def edit_message(self, mid, text, attachments):
+    async def edit_message(self, mid, text, attachments, *, format=None):
         if not isinstance(mid, str) or not mid.strip():
             raise ValueError('Некорректный ID сообщения.')
         result = await self._request('PUT', '/messages', params={'message_id': mid},
-                                     json={'text': text, 'attachments': attachments})
+                                     json={'text': text, 'attachments': attachments, **({'format': format} if format else {})})
         if result.get('success') is not True:
             raise MaxAPIError('MAX не подтвердил редактирование.', uncertain=True)
         return mid
@@ -168,7 +169,8 @@ class MaxClient:
             raise MaxAPIError('MAX не подтвердил удаление сообщения.')
 
     async def answer_callback(self, callback_id):
-        result = await self._request('POST', '/answers', params={'callback_id': callback_id}, json={})
+        result = await self._request('POST', '/answers', params={'callback_id': callback_id},
+                                     json={'notification': 'Кнопка обработана.'})
         if result.get('success') is not True:
             raise MaxAPIError('MAX не подтвердил ответ на кнопку.', uncertain=True)
 

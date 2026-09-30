@@ -64,6 +64,16 @@ class ActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(json.loads(r['attachments_json']) == [] for r in cards))
         self.assertTrue(all(r['revision'] == 3 for r in cards))
 
+    async def test_admin_can_take_without_specialist_role(self):
+        with self.store.connect() as conn:
+            conn.execute("INSERT INTO bot_roles VALUES (77,'admin')")
+        await self.click(actor=77)
+        await self.processor.tick()
+        self.assertEqual(self.rows('requests')[0]['specialist_id'], 77)
+        await self.click('done', actor=77, rev=2, click='admin-done')
+        await self.processor.tick()
+        self.assertEqual(self.rows('requests')[0]['status'], 'closed')
+
     async def test_permissions_and_wrong_card(self):
         for kwargs, expected in [({'actor': 10}, 'forbidden_callback'),
                                   ({'chat': -40, 'mid': 'mid--30'}, 'unknown_callback_card'),
@@ -132,6 +142,7 @@ class ActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.calls[0][0][0], 'PUT')
         self.assertEqual(session.calls[0][1]['json']['attachments'], [])
         self.assertEqual(session.calls[1][1]['params'], {'callback_id': 'click'})
+        self.assertTrue(session.calls[1][1]['json']['notification'])
         async with MaxClient(settings, session=Session(Response({'success': False}))) as client:
             with self.assertRaises(MaxAPIError):
                 await client.edit_message('mid', 'Готово', [])

@@ -67,7 +67,7 @@ class OriginalForwardTests(unittest.IsolatedAsyncioTestCase):
         settings = load_settings(self.root, {'MAX_BOT_TOKEN': 'test'})
         async with MaxClient(settings, session=session) as client:
             self.assertEqual(await client.send_message(-30, 'Заявка #1', forward_mid='m1'), 'forwarded')
-        self.assertEqual(session.calls[0][1]['json'], {'text': 'Заявка #1', 'link': {'type': 'forward', 'mid': 'm1'}})
+        self.assertEqual(session.calls[0][1]['json'], {'text': '', 'link': {'type': 'forward', 'mid': 'm1'}})
 
     async def test_upgrade_from_14_preserves_jobs(self):
         with self.store.connect() as conn:
