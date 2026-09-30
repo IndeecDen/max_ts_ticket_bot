@@ -42,7 +42,8 @@ class BackupTests(unittest.IsolatedAsyncioTestCase):
         finally:
             live.close()
         manifest=verify_backup(self.output)
-        self.assertEqual(manifest['schema_version'],15)
+        from app.storage.inbox import SCHEMA_VERSION
+        self.assertEqual(manifest['schema_version'], SCHEMA_VERSION)
         restored=restore_backup(self.output,self.root/'restored')
         conn=sqlite3.connect(restored/'database.sqlite3')
         try:

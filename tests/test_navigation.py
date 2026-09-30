@@ -19,7 +19,31 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
                 (chat,user,status,specialist)).lastrowid
 
     def replies(self):
-        return [r for r in self.rows('outbox') if r['destination'].startswith('navigation:')]
+        groups = {}
+        for row in self.rows('outbox'):
+            if not row['destination'].startswith('navigation:'):
+                continue
+            key = row['destination'].split(':part:')[0]
+            if key not in groups:
+                groups[key] = dict(row)
+            else:
+                groups[key]['text'] += '\n\n' + row['text']
+        return list(groups.values())
+
+    async def test_work_lists_include_escaped_request_text(self):
+        request_id = self.add()
+        with self.store.connect() as conn:
+            conn.execute('INSERT INTO request_messages VALUES (?,?,?,?)',
+                         (999, request_id, 'source', json.dumps({'message': {'body': {'text': '<b>Проверка заявки</b>'}}})))
+        for index, command in enumerate(('/open_requests', '/open_unassigned_requests', '/my_active_requests')):
+            if index == 2:
+                with self.store.connect() as conn:
+                    conn.execute("UPDATE requests SET status='in_progress',specialist_id=99 WHERE id=?", (request_id,))
+            await self.command(command, actor=99, mid='preview-' + str(index))
+            reply = self.replies()[-1]
+            self.assertIn('&lt;b&gt;Проверка заявки&lt;/b&gt;', reply['text'])
+            self.assertIn('Чат: -20', reply['text'])
+            self.assertEqual(reply['text_format'], 'html')
 
     async def click(self, payload='nav:open_requests', actor=99, chat=-30, mid='menu-mid', callback_id='cb'):
         await self.store.save(IncomingEvent.parse({'update_type':'message_callback','timestamp':1,

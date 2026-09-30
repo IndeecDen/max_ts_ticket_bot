@@ -8,7 +8,7 @@ from pathlib import Path
 from app.domain.events import IncomingEvent
 
 APPLICATION_ID = 0x4D585442  # MXTB; refuse unrelated databases, including Telegram.
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 class InboxSchemaError(RuntimeError):
@@ -36,7 +36,7 @@ class InboxStore:
             has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()
             if app_id not in (0, APPLICATION_ID) or (app_id == 0 and has_tables):
                 raise InboxSchemaError('DATABASE_PATH указывает на чужую базу. Укажите отдельную базу MAX.')
-            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, SCHEMA_VERSION):
                 raise InboxSchemaError('Версия базы MAX не поддерживается этим приложением.')
             conn.execute('PRAGMA journal_mode=WAL')
             conn.execute('BEGIN IMMEDIATE')
@@ -138,6 +138,8 @@ class InboxStore:
                 expires_at_ms INTEGER, active_from TEXT, active_to TEXT,
                 created_by INTEGER NOT NULL, created_at_ms INTEGER NOT NULL
             )''')
+            if 'text_format' not in {r[1] for r in conn.execute('PRAGMA table_info(outbox)')}:
+                conn.execute('ALTER TABLE outbox ADD COLUMN text_format TEXT')
             conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_statistics_completed ON requests(status,ended_at_ms,specialist_id)')
 

@@ -1,7 +1,9 @@
 """Role-scoped navigation and bounded request lists; no request mutations."""
 import json
+import html
 import re
 from app.services.roles import has_role, ManagementError
+from app.services.user_names import display_name
 
 COMMANDS = frozenset(('/start', '/help', '/menu', '/whoami', '/my_requests',
                       '/open_requests', '/open_unassigned_requests', '/my_active_requests'))
@@ -20,6 +22,8 @@ def handle(conn, key, actor, chat, text, policy):
     command = parts[0]
     attachments = []
     outcome = 'navigation_done'
+    formatted = False
+    replies = None
     try:
         if command in ('/start', '/help', '/menu', '/whoami'):
             if len(parts) != 1:
@@ -82,21 +86,42 @@ def handle(conn, key, actor, chat, text, policy):
             rows = conn.execute('SELECT id,chat_id,status,specialist_id FROM requests WHERE '+where+
                                 ' ORDER BY id DESC LIMIT 10 OFFSET ?', [*args,(page-1)*10]).fetchall()
             lines = [f'{title}: {count}. Страница {page}/{pages}.']
+            replies = []
+            formatted = True
             for request_id, request_chat, status, specialist in rows:
-                suffix = f' · специалист {specialist}' if work and specialist is not None else ''
-                location = f' · чат {request_chat}' if work else ''
-                lines.append(f'#{request_id} · {LABELS[status]}{location}{suffix}')
+                suffix = f' · специалист {html.escape(display_name(conn, specialist))}' if work and specialist is not None else ''
+                location = f'\nЧат: {request_chat}' if work else ''
+                header = f'#{request_id} · {LABELS[status]}{suffix}{location}\n'
+                texts = []
+                for (raw,) in conn.execute('SELECT payload_json FROM request_messages WHERE request_id=? ORDER BY event_id', (request_id,)):
+                    body = (json.loads(raw).get('message') or {}).get('body') or {}
+                    texts.append(body.get('text') or '[Вложение или пересылка]')
+                # Bounded preview keeps ten requests usable; full text remains available.
+                preview = '\n'.join(texts)
+                bounded = ''
+                for char in preview:
+                    escaped = html.escape(char)
+                    if len((header + bounded + escaped).encode('utf-16-le')) // 2 > 2700:
+                        bounded += f'…\nПолный текст: /request {request_id}'
+                        break
+                    bounded += escaped
+                item = header + bounded
+                if lines and (len(lines) > 1 or len(('\n\n'.join(lines) + '\n\n' + item).encode('utf-16-le')) // 2 > 2700):
+                    replies.append('\n\n'.join(lines))
+                    lines = []
+                lines.append(item)
             if not rows:
                 lines.append('Заявок нет.')
-            if rows:
-                lines.append('Полный текст: /request <номер заявки>.')
             if pages > 1:
                 lines.append(f'Открыть страницу: {command} <номер>.')
-            reply = '\n'.join(lines)
+            replies.append('\n\n'.join(lines))
+            reply = replies[0]
     except ManagementError as exc:
         reply, outcome = str(exc), 'navigation_rejected'
-    conn.execute('''INSERT INTO outbox(request_id,destination,chat_id,text,attachments_json,menu_owner)
-        VALUES (0,?,?,?,?,?)''', (f'navigation:{key}', chat, reply, json.dumps(attachments, ensure_ascii=False), actor))
+    for index, reply in enumerate(replies or [reply]):
+        conn.execute('''INSERT INTO outbox(request_id,destination,chat_id,text,attachments_json,menu_owner,text_format)
+            VALUES (0,?,?,?,?,?,?)''', (f'navigation:{key}' + (f':part:{index}' if index else ''), chat, reply,
+            json.dumps(attachments, ensure_ascii=False), actor, 'html' if formatted else None))
     return outcome
 
 

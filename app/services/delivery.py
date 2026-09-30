@@ -2,6 +2,7 @@
 import asyncio
 import json
 import html
+import re
 from urllib.parse import urlsplit
 import sqlite3
 import time
@@ -209,7 +210,27 @@ class DeliveryQueue:
                     return 'pending'
                 attachments = ([{'type': 'file', 'payload': {'token': job['file_token']}}]
                                if job['report_json'] else json.loads(job['attachments_json']))
-                text, formatting = job['text'], {}
+                text = job['text']
+                formatting = {'format': job['text_format']} if job['text_format'] else {}
+                if job['destination'].startswith('navigation:') and job['text_format'] == 'html' and callable(getattr(client, 'get_chat', None)):
+                    for source_chat in set(re.findall(r'^Чат: (-?\d+)$', text, re.MULTILINE)):
+                        source_id = int(source_chat)
+                        info = self.chat_cache.get(source_id)
+                        if info is None:
+                            try:
+                                info = await client.get_chat(source_id)
+                            except MaxAPIError:
+                                info = {}
+                            if isinstance(info, dict) and info:
+                                self.chat_cache[source_id] = info
+                        if isinstance(info, dict):
+                            # Reuse the card link renderer, including escaping and URL validation.
+                            link_info = dict(info)
+                            link_info['title'] = str(info.get('title') or source_chat)[:80]
+                            if len(str(link_info.get('link') or '')) > 256:
+                                link_info['link'] = None
+                            title_line = render_work_card(f'Заявка\nАвтор: A\nЧат: {source_chat}\nСтатус', 1, link_info).split('\n')[2]
+                            text = re.sub(r'^Чат: ' + re.escape(source_chat) + r'$', lambda _: title_line, text, flags=re.MULTILINE)
                 if job['destination'] == 'work' and job['request_id'] and callable(getattr(client, 'get_chat', None)):
                     with self.store.connect() as conn:
                         source = conn.execute('SELECT chat_id,user_id FROM requests WHERE id=?', (job['request_id'],)).fetchone()
