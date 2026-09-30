@@ -93,11 +93,13 @@ class RoleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reassign_changes_both_cards_preserves_start_and_invalidates_old_button(self):
         await self.make_request()
+        with self.store.connect() as conn:
+            conn.execute("INSERT INTO bot_meta VALUES ('user_name:98','Анна')")
         await self.message('/reassign 1 98')
         row = self.rows('requests')[0]
         self.assertEqual((row['specialist_id'], row['revision'], row['started_at_ms']), (98, 3, 123))
         cards = [r for r in self.rows('outbox') if r['destination'] in ('work', 'client')]
-        self.assertTrue(all(r['revision'] == 3 and '98' in r['text'] for r in cards))
+        self.assertTrue(all(r['revision'] == 3 and 'Анна' in r['text'] for r in cards))
         await self.callback(99)
         self.assertEqual(self.rows('inbox_events')[-1]['outcome'], 'stale_callback')
         await self.callback(98, revision=3, click='new-done')

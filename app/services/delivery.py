@@ -10,6 +10,7 @@ from pathlib import Path
 
 from app.services import autoclean
 from app.services.notices import active_texts
+from app.services.user_names import display_name
 from app.adapters.max.client import MaxAPIError
 from app.storage.delivery_lock import DeliveryLock, DeliveryBusy
 
@@ -66,9 +67,16 @@ def enqueue_cards(conn, work_chat, *, now_ms=None, timezone="Europe/Moscow"):
             link = message.get('link')
             if (body.get('attachments') or (isinstance(link, dict) and link.get('type') == 'forward')) and isinstance(mid, str) and mid.strip():
                 forwards.append((event_id, mid))
-        assigned = f'\nСпециалист: {specialist}' if specialist else ''
+        specialist_name = display_name(conn, specialist) if specialist else 'Специалист'
+        assigned = f'\nСпециалист: {specialist_name}' if specialist else ''
         work = clip(f'Заявка #{request_id}\nАвтор: {author}\nЧат: {chat}\n{labels[status]}{assigned}\n\n' + '\n'.join(snippets))
-        client = f'Заявка #{request_id}: {labels[status]}.{assigned}'
+        client_status = {
+            'new': 'Заявка ожидает специалиста 👨‍🔧',
+            'in_progress': f'Заявка в работе у 👨‍🔧 "{specialist_name}"',
+            'closed': f'Заявка закрыта. Спасибо за обращение!👨‍🔧 "{specialist_name}"',
+            'cancelled': 'Заявка отменена.',
+        }[status]
+        client = f'Заявка #{request_id}\n{client_status}'
         if status == 'new':
             notices = active_texts(conn, timezone, int(time.time() * 1000) if now_ms is None else now_ms)
             if notices:

@@ -97,6 +97,10 @@ class InboxProcessor:
 
     def _handle(self, conn, event_id, payload, received_at):
         event = json.loads(payload)
+        from app.services.user_names import remember
+        source = event.get('callback') if event.get('update_type') == 'message_callback' else event.get('message')
+        if isinstance(source, dict):
+            remember(conn, source.get('user') if event.get('update_type') == 'message_callback' else source.get('sender'))
         if event.get('update_type') == 'message_callback':
             return self._callback(conn, event, received_at)
         msg = event.get('message')
