@@ -52,3 +52,11 @@ class ReleaseBundleTests(unittest.TestCase):
 
     def test_version_cannot_escape_archive_directory(self):
         with self.assertRaises(ValueError): builder.build(self.root, Path(self.temp.name) / 'a.zip', '../other')
+
+    def test_brand_assets_are_allowed_in_release(self):
+        assets = self.root / 'assets'
+        (assets / 'max-ticket-bot.svg').write_text('<svg/>', encoding='utf-8')
+        output = Path(self.temp.name) / 'brand.zip'
+        builder.build(self.root, output, '1.0.1')
+        with zipfile.ZipFile(output) as archive:
+            self.assertIn('max-ts-ticket-bot-1.0.1/assets/max-ticket-bot.svg', archive.namelist())

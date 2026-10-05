@@ -60,7 +60,9 @@ def enqueue_cards(conn, work_chat, *, now_ms=None, timezone="Europe/Moscow"):
         first_card = conn.execute("SELECT 1 FROM outbox WHERE request_id=? AND destination='work'", (request_id,)).fetchone() is None
         snippets = []
         forwards = []
-        for event_id, raw in conn.execute('SELECT event_id,payload_json FROM request_messages WHERE request_id=? ORDER BY event_id', (request_id,)):
+        # The work card and optional original contain only the first message.
+        # Supplements remain accessible through the full request view.
+        for event_id, raw in conn.execute('SELECT event_id,payload_json FROM request_messages WHERE request_id=? ORDER BY event_id LIMIT 1', (request_id,)):
             message = json.loads(raw)['message']
             body = message.get('body') or {}
             snippets.append(body.get('text') or '[Сообщение без текста: вложение или пересылка]')
@@ -126,7 +128,7 @@ class DeliveryQueue:
                     WHERE o.state='pending' AND o.next_at_ms<=? AND coalesce(s.next_at_ms,0)<=?
                     AND (o.delete_mid IS NULL OR ?)
                     AND NOT EXISTS (SELECT 1 FROM outbox busy WHERE busy.chat_id=o.chat_id AND busy.state='sending')
-                    ORDER BY o.id LIMIT 100''', (now, now, cleanup_allowed)).fetchall()
+                     ORDER BY (o.callback_id IS NOT NULL) DESC,o.id LIMIT 100''', (now, now, cleanup_allowed)).fetchall()
                 row = None
                 for candidate in rows:
                     if candidate['delete_mid']:

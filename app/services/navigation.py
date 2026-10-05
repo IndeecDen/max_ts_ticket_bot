@@ -35,7 +35,7 @@ def handle(conn, key, actor, chat, text, policy, *, private_admin=False):
                 reply = f"Ваш MAX ID: {actor}\nID чата: {chat}\nРоли бота: {', '.join(roles) or 'клиент'}."
             else:
                 reply = ('Бот технической поддержки MAX.\n'
-                         '/menu — меню администратора в личном диалоге; /help — помощь; /whoami — ваши ID и роли.\n')
+                          '/menu — меню сотрудников в личном диалоге; /help — помощь; /whoami — ваши ID и роли.\n')
                 buttons = [('Мои ID', 'whoami'), ('Помощь', 'help')]
                 if not work:
                     reply += ('Отправьте описание проблемы обычным сообщением. После ожидания ответа сотрудника '
@@ -61,8 +61,9 @@ def handle(conn, key, actor, chat, text, policy, *, private_admin=False):
                 if not work or staff:
                     reply += '\n/request <номер> [страница] — полный сохранённый текст обращения.'
                 if private_admin:
-                    attachments = [{'type':'inline_keyboard','payload':{'buttons':[
-                        [{'type':'callback','text':label,'payload':'nav:'+name}] for label, name in buttons]}}]
+                    button_rows = [[{'type':'callback','text':label,'payload':'nav:'+name}]
+                                   for label, name in buttons]
+                    attachments = [{'type':'inline_keyboard','payload':{'buttons':button_rows}}]
         else:
             if command == '/my_requests':
                 if work:
@@ -141,7 +142,7 @@ def callback(conn, event, policy):
     chat, mid, actor = recipient.get('chat_id'), body.get('mid'), user['user_id']
     if type(chat) is not int or not isinstance(mid, str):
         return 'invalid_navigation_callback'
-    if recipient.get('chat_type') != 'dialog' or not has_role(conn, actor, 'admin'):
+    if recipient.get('chat_type') != 'dialog' or not (has_role(conn, actor, 'admin') or has_role(conn, actor, 'specialist')):
         return 'private_menu_only'
     # Bind buttons to an actual menu sent for this user and this chat.
     menu = conn.execute('''SELECT attachments_json FROM outbox WHERE message_id=? AND chat_id=?

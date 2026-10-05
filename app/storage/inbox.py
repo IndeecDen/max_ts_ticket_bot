@@ -8,7 +8,7 @@ from pathlib import Path
 from app.domain.events import IncomingEvent
 
 APPLICATION_ID = 0x4D585442  # MXTB; refuse unrelated databases, including Telegram.
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 19
 
 
 class InboxSchemaError(RuntimeError):
@@ -36,7 +36,7 @@ class InboxStore:
             has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()
             if app_id not in (0, APPLICATION_ID) or (app_id == 0 and has_tables):
                 raise InboxSchemaError('DATABASE_PATH указывает на чужую базу. Укажите отдельную базу MAX.')
-            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, SCHEMA_VERSION):
+            if version not in (*range(19), SCHEMA_VERSION):
                 raise InboxSchemaError('Версия базы MAX не поддерживается этим приложением.')
             conn.execute('PRAGMA journal_mode=WAL')
             conn.execute('BEGIN IMMEDIATE')
@@ -120,6 +120,18 @@ class InboxStore:
                 PRIMARY KEY(user_id,role)
             )''')
             conn.execute('CREATE TABLE IF NOT EXISTS bot_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL)')
+            conn.execute('''CREATE TABLE IF NOT EXISTS menu_sessions (
+                chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                action TEXT NOT NULL, PRIMARY KEY(chat_id,user_id)
+            )''')
+            if 'expires_at_ms' not in {r[1] for r in conn.execute('PRAGMA table_info(menu_sessions)')}:
+                conn.execute('ALTER TABLE menu_sessions ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0')
+            if 'archived_at_ms' not in {r[1] for r in conn.execute('PRAGMA table_info(outbox)')}:
+                conn.execute('ALTER TABLE outbox ADD COLUMN archived_at_ms INTEGER')
+                # One-time migration of retired menu failures; preserve every job.
+                conn.execute("""UPDATE outbox SET archived_at_ms=CAST(strftime('%s','now') AS INTEGER)*1000
+                    WHERE state='failed' AND callback_id IS NULL
+                    AND destination LIKE 'navigation:%' AND attachments_json LIKE '%nav:home%'""")
             conn.execute('CREATE TABLE IF NOT EXISTS ignored_words (word TEXT PRIMARY KEY)')
             conn.execute('''CREATE TABLE IF NOT EXISTS management_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, actor_id INTEGER, event_id INTEGER,

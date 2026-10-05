@@ -90,6 +90,20 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await second.stop(1)
 
+    async def test_archived_failures_visible_but_new_failures_degrade(self):
+        with self.store.connect() as conn:
+            conn.execute("""INSERT INTO outbox(request_id,destination,chat_id,text,state,archived_at_ms)
+                VALUES (0,'legacy',-20,'old','failed',1)""")
+        async def checked():
+            return not any(self.app[RUNTIME].errors.values())
+        await eventually(checked)
+        ok, details = await self.app[RUNTIME].health()
+        self.assertTrue(ok)
+        self.assertEqual(details['archived_failures'], 1)
+        with self.store.connect() as conn:
+            conn.execute("INSERT INTO outbox(request_id,destination,chat_id,text,state) VALUES (0,'new',-20,'new','failed')")
+        self.assertFalse((await self.app[RUNTIME].health())[0])
+
     async def test_inbox_error_does_not_stop_delivery_and_recovers(self):
         runtime = self.app[RUNTIME]
         with patch.object(runtime.processor, '_tick', side_effect=sqlite3.OperationalError('private-payload')):

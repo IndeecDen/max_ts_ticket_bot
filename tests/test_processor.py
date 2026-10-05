@@ -50,7 +50,32 @@ class ProcessorTests(unittest.IsolatedAsyncioTestCase):
         await self.add('m3')
         await self.processor.tick()
         self.assertEqual(len(self.rows('requests')), 1)
-        self.assertEqual(len(self.rows('request_messages')), 2)
+        self.assertEqual(len(self.rows('request_messages')), 3)
+        self.assertEqual(self.rows('requests')[0]['revision'], 1)
+        self.assertEqual(self.rows('inbox_events')[-1]['outcome'], 'request_supplemented')
+
+    async def test_supplements_preserved_without_work_chat_flood(self):
+        await self.add('first', text='Первое сообщение')
+        await self.processor.tick(now_ms=0)
+        await self.add('second', text='Второе сообщение')
+        await self.processor.tick(now_ms=2**62)
+        before = self.rows('outbox')
+        work = next(r for r in before if r['destination'] == 'work')
+        self.assertIn('Первое сообщение', work['text'])
+        self.assertNotIn('Второе сообщение', work['text'])
+        payload = await self.add('third', text='Дополнение с файлом')
+        payload['message']['body']['mid'] = 'fourth'
+        payload['message']['body']['attachments'] = [{'type': 'file'}]
+        await self.store.save(IncomingEvent.parse(payload))
+        await self.processor.tick(now_ms=2**62)
+        self.assertEqual(self.rows('outbox'), before)
+        self.assertEqual(len(self.rows('request_messages')), 4)
+        with self.store.connect() as conn:
+            conn.execute("UPDATE requests SET status='in_progress',specialist_id=99,revision=revision+1")
+        await self.processor.tick(now_ms=2**62)
+        work = next(r for r in self.rows('outbox') if r['destination'] == 'work')
+        self.assertNotIn('Дополнение', work['text'])
+        self.assertIn('В работе', work['text'])
 
     async def test_specialist_cancels_all_waiting_clients_even_across_batches(self):
         await self.add(user=10)

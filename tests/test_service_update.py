@@ -25,6 +25,11 @@ class ServiceUpdateTests(unittest.TestCase):
             context.start(); self.addCleanup(context.stop)
         context = patch.object(update, 'load_profile', return_value=(self.settings, None))
         context.start(); self.addCleanup(context.stop)
+        # The production path is validated as a value, never inspected on this host.
+        original = Path.is_symlink
+        context = patch.object(Path, 'is_symlink', lambda path: False if path in
+            (self.settings.database_path, self.settings.database_path.parent) else original(path))
+        context.start(); self.addCleanup(context.stop)
         self.events = []
         self.overrides = {}
 

@@ -11,7 +11,7 @@ from app.config import ConfigError
 from app.services.delivery import enqueue_cards, clip
 from app.services.roles import bootstrap_roles, has_role, change_role, reassign, ManagementError
 from app.services.preferences import bootstrap_preferences, get_timeout, set_timeout, change_words, is_ignored
-from app.services import daily_digest, notices, autoclean, navigation, request_view, admin_requests
+from app.services import daily_digest, notices, autoclean, navigation, request_view, admin_requests, staff_menu
 from app.services.reminders import configure, read_settings, describe, enqueue_reminders
 from app.services.statistics import period_bounds, read_statistics, render_statistics
 
@@ -102,7 +102,7 @@ class InboxProcessor:
         if isinstance(source, dict):
             remember(conn, source.get('user') if event.get('update_type') == 'message_callback' else source.get('sender'))
         if event.get('update_type') == 'message_callback':
-            return self._callback(conn, event, received_at)
+            return self._callback(conn, event, received_at, event_id)
         msg = event.get('message')
         if not isinstance(msg, dict):
             return 'invalid_message'
@@ -112,10 +112,11 @@ class InboxProcessor:
         user, chat = sender.get('user_id'), recipient.get('chat_id')
         if not valid_id(user) or not valid_id(chat):
             return 'invalid_id'
-        private_admin = recipient.get('chat_type') == 'dialog' and has_role(conn, user, 'admin')
-        if recipient.get('chat_type') == 'dialog' and not private_admin:
+        private_staff = recipient.get('chat_type') == 'dialog' and staff_menu.is_staff(conn, user)
+        if recipient.get('chat_type') == 'dialog' and not private_staff:
+            staff_menu.clear(conn, user, chat)
             return 'ignored_private_dialog'
-        if self.policy.auto_client_chats and chat != self.policy.work_chat and recipient.get('chat_type') != 'chat' and not private_admin:
+        if self.policy.auto_client_chats and chat != self.policy.work_chat and recipient.get('chat_type') != 'chat' and not private_staff:
             return 'ignored_chat'
         # Missing bot flag is not assumed to mean a human.
         if sender.get('is_bot') is not False:
@@ -127,8 +128,12 @@ class InboxProcessor:
         text = body.get('text') or ''
         if not isinstance(text, str):
             return 'invalid_text'
+        if private_staff:
+            outcome = staff_menu.message(conn, event_id, user, chat, text, received_at, self)
+            if outcome is not None:
+                return outcome
         command_policy = self.policy
-        if private_admin:
+        if private_staff:
             from dataclasses import replace
             command_policy = replace(self.policy, work_chat=chat, client_chats=self.policy.client_chats - {chat})
         if text.split() and text.split()[0] in admin_requests.COMMANDS:
@@ -136,14 +141,14 @@ class InboxProcessor:
         if text.split() and text.split()[0] == '/request':
             return request_view.handle(conn, event_id, user, chat, text, command_policy)
         if text.split() and text.split()[0] in navigation.COMMANDS:
-            return navigation.handle(conn, str(event_id), user, chat, text, command_policy, private_admin=private_admin)
-        if (chat == self.policy.work_chat or private_admin) and text.lstrip().startswith('/'):
+            return navigation.handle(conn, str(event_id), user, chat, text, command_policy, private_admin=private_staff)
+        if (chat == self.policy.work_chat or private_staff) and text.lstrip().startswith('/'):
             if text.split()[0] in ('/stats', '/my_stats', '/stats_xlsx', '/my_stats_xlsx'):
                 return self._statistics(conn, event_id, user, chat, text, received_at)
             if text.split()[0] in ('/set_notice', '/get_notice', '/del_notice'):
                 return self._notices(conn, event_id, user, chat, text, received_at)
             return self._management(conn, event_id, user, chat, text, received_at)
-        if private_admin:
+        if private_staff:
             return 'ignored_private_text'
         if not self.policy.is_client(chat):
             return 'ignored_chat'
@@ -158,8 +163,6 @@ class InboxProcessor:
             return 'ignored_empty'
         existing = conn.execute("""SELECT id,status FROM requests WHERE chat_id=? AND user_id=?
             AND status IN ('waiting','new','in_progress')""", (chat, user)).fetchone()
-        if existing and existing[1] in ('new', 'in_progress'):
-            return 'active_request_exists'
         if existing:
             request_id = existing[0]
         else:
@@ -173,11 +176,13 @@ class InboxProcessor:
                 received_ms + get_timeout(conn) * 1000, received_ms)).lastrowid
         conn.execute('INSERT INTO request_messages VALUES (?,?,?,?)',
                      (event_id, request_id, body.get('mid'), payload))
-        return 'collected'
+        return 'request_supplemented' if existing and existing[1] in ('new', 'in_progress') else 'collected'
 
-    def _callback(self, conn, event, received_at):
+    def _callback(self, conn, event, received_at, event_id=None):
         callback = event.get('callback') or {}
         data = callback.get('payload')
+        if isinstance(data, str) and data.startswith('ui:'):
+            return staff_menu.callback(conn, event_id, event, received_at, self)
         if isinstance(data, str) and data in navigation.CALLBACKS:
             return navigation.callback(conn, event, self.policy)
         match = re.fullmatch(r'(take|done|cancel):([1-9][0-9]{0,17}):([1-9][0-9]{0,17})', data) if isinstance(data, str) else None

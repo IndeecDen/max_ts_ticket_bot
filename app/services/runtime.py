@@ -33,7 +33,7 @@ class BotRuntime:
             if name == 'delivery':
                 self.delivery_active = True
             try:
-                await action()
+                result = await action()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -45,6 +45,11 @@ class BotRuntime:
             finally:
                 if name == 'delivery':
                     self.delivery_active = False
+            if name == 'delivery' and self.errors[name] is None and result is not None:
+                # Drain available work across chats, with a conservative global cap.
+                # Per-chat durable slots continue to enforce recipient limits.
+                await asyncio.sleep(0.1)
+                continue
             try:
                 await asyncio.wait_for(self.stop_event.wait(), timeout=self.interval)
             except asyncio.TimeoutError:
@@ -64,10 +69,14 @@ class BotRuntime:
         # Old callback acknowledgements expire; retain them for diagnostics but
         # do not block an otherwise operational bot or its upgrade readiness.
         with self.queue.store.connect() as conn:
-            failed_messages = conn.execute("SELECT count(*) FROM outbox WHERE state='failed' AND callback_id IS NULL").fetchone()[0]
+            failed_messages = conn.execute("""SELECT count(*) FROM outbox
+                WHERE state='failed' AND callback_id IS NULL
+                AND archived_at_ms IS NULL""").fetchone()[0]
+            archived = conn.execute('SELECT count(*) FROM outbox WHERE archived_at_ms IS NOT NULL').fetchone()[0]
         loops_ok = bool(self.tasks) and all(not t.done() for t in self.tasks.values())
         ok = (loops_ok and not self.stop_event.is_set() and not any(self.errors.values())
               and not self.interrupted_sends and not failed_messages and not counts.get('uncertain')
               and counts.get('sending', 0) <= len(self.queue.active_jobs))
         return ok, {'workers': dict(self.errors), 'outbox': counts,
+                    'archived_failures': archived,
                     'interrupted_sends': self.interrupted_sends}

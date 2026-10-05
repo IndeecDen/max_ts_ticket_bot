@@ -53,6 +53,8 @@ class ActionTests(unittest.IsolatedAsyncioTestCase):
         row = self.rows('requests')[0]
         self.assertEqual((row['status'], row['specialist_id'], row['revision']), ('in_progress', 99, 2))
         await self.queue.deliver_one(self.client, lambda: 2000)
+        self.client.answer_callback.assert_awaited_once()
+        await self.queue.deliver_one(self.client, lambda: 4000)
         self.client.edit_message.assert_awaited_once()
         args = self.client.edit_message.await_args.args
         self.assertEqual(args[0], 'mid--30')
@@ -115,7 +117,9 @@ class ActionTests(unittest.IsolatedAsyncioTestCase):
     async def test_change_during_delivery_does_not_lose_new_revision(self):
         await self.click()
         await self.processor.tick()
-        job = self.queue._claim(2000)
+        await self.queue.deliver_one(self.client, lambda: 2000)
+        job = self.queue._claim(4000)
+        self.addCleanup(job['_lock'].close)
         self.assertEqual(job['revision'], 2)
         await self.click('done', rev=2, click='finish')
         await self.processor.tick()

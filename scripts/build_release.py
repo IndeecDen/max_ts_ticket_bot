@@ -10,7 +10,7 @@ import shutil
 
 ROOT_FILES = ('.env.example', '.gitignore', '.gitattributes', 'README.md',
               'MIGRATION_PLAN.md', 'requirements.in', 'requirements.txt')
-TREES = {'app': {'.py'}, 'tests': {'.py'}, 'scripts': {'.py', '.sh'},
+TREES = {'app': {'.py'}, 'tests': {'.py'}, 'scripts': {'.py', '.sh'}, 'assets': {'.svg'},
          'docs': {'.md'}, 'deploy': {'.service', '.timer'}, '.github/workflows': {'.yml', '.yaml'}}
 
 
