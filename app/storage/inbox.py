@@ -8,7 +8,7 @@ from pathlib import Path
 from app.domain.events import IncomingEvent
 
 APPLICATION_ID = 0x4D585442  # MXTB; refuse unrelated databases, including Telegram.
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 21
 
 
 class InboxSchemaError(RuntimeError):
@@ -36,7 +36,7 @@ class InboxStore:
             has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone()
             if app_id not in (0, APPLICATION_ID) or (app_id == 0 and has_tables):
                 raise InboxSchemaError('DATABASE_PATH указывает на чужую базу. Укажите отдельную базу MAX.')
-            if version not in (*range(19), SCHEMA_VERSION):
+            if version not in range(SCHEMA_VERSION + 1):
                 raise InboxSchemaError('Версия базы MAX не поддерживается этим приложением.')
             conn.execute('PRAGMA journal_mode=WAL')
             conn.execute('BEGIN IMMEDIATE')
@@ -152,6 +152,19 @@ class InboxStore:
             )''')
             if 'text_format' not in {r[1] for r in conn.execute('PRAGMA table_info(outbox)')}:
                 conn.execute('ALTER TABLE outbox ADD COLUMN text_format TEXT')
+            conn.execute('''CREATE TABLE IF NOT EXISTS broadcast_chats (
+                chat_id INTEGER PRIMARY KEY, active INTEGER NOT NULL, timestamp_ms INTEGER NOT NULL)''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS broadcasts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, actor INTEGER NOT NULL, chat_id INTEGER NOT NULL,
+                text TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'draft',
+                due_at_ms INTEGER NOT NULL DEFAULT 0, created_at_ms INTEGER NOT NULL)''')
+            if version < 20:
+                import json
+                from app.services.broadcasts import remember_chat
+                for (raw,) in conn.execute('SELECT payload_json FROM inbox_events ORDER BY timestamp_ms,id'):
+                    remember_chat(conn, json.loads(raw))
+            if 'attachments_json' not in {r[1] for r in conn.execute('PRAGMA table_info(broadcasts)')}:
+                conn.execute("ALTER TABLE broadcasts ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'")
             conn.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_statistics_completed ON requests(status,ended_at_ms,specialist_id)')
 

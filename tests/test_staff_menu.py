@@ -118,6 +118,37 @@ class StaffMenuTests(unittest.IsolatedAsyncioTestCase):
         await self.private_command(f'{target} Дубликат', mid='cancel-input')
         self.assertEqual(self.rows('requests')[0]['status'], 'cancelled')
 
+    async def test_admin_closes_all_from_settings_and_requests(self):
+        self.add(user=10)
+        self.add(user=11, status='in_progress', specialist=99)
+        waiting = self.add(user=12, status='waiting')
+        await self.private_command('/menu')
+        await self.choose('settings')
+        await self.choose('close_all')
+        rows = self.rows('requests')
+        self.assertTrue(all(r['status'] == 'closed' and r['ended_at_ms'] for r in rows if r['id'] != waiting))
+        self.assertEqual(next(r['status'] for r in rows if r['id'] == waiting), 'waiting')
+        self.assertTrue(any('✅ Завершено заявок: 2' in r['text'] for r in self.rows('outbox')))
+        self.assertEqual(len([r for r in self.rows('management_log') if r['action'] == 'admin_close_all']), 2)
+        await self.choose('requests')
+        await self.choose('close_all')
+        self.assertTrue(any('✅ Завершено заявок: 0' in r['text'] for r in self.rows('outbox')))
+
+    async def test_close_all_rechecks_admin_role(self):
+        self.add()
+        await self.private_command('/menu')
+        await self.choose('requests')
+        with self.store.connect() as conn:
+            conn.execute("DELETE FROM bot_roles WHERE user_id=77 AND role='admin'")
+            conn.execute("INSERT INTO bot_roles VALUES (77,'specialist')")
+        await self.choose('close_all')
+        self.assertEqual(self.rows('inbox_events')[-1]['outcome'], 'forbidden_management')
+        self.assertEqual(self.rows('requests')[0]['status'], 'new')
+        await self.private_command('/menu', actor=99, mid='specialist-menu')
+        await self.choose('requests', 99)
+        menu = next(r for r in reversed(self.rows('outbox')) if r['menu_owner'] == 99)
+        self.assertNotIn('ui:close_all', menu['attachments_json'])
+
     async def test_schema17_upgrade_preserves_existing_chat_registry(self):
         with self.store.connect() as conn:
             conn.execute('DROP TABLE menu_sessions')

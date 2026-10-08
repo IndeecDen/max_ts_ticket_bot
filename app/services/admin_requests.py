@@ -56,7 +56,7 @@ def handle(conn, event_id, actor, chat, text, received_at, policy):
             conn.execute("UPDATE requests SET status='closed',ended_at_ms=?,revision=revision+1 WHERE status IN ('new','in_progress')",(now,))
             for target, previous in rows:
                 log_change(conn,actor,event_id,'admin_close_all',target,{'from':previous})
-            reply = f'Закрыто заявок: {len(rows)}. Обращения на стадии ожидания не изменены.'
+            reply = f'✅ Завершено заявок: {len(rows)}\nОбращения на стадии ожидания не изменены.'
         else:
             raise ManagementError('Использование: /close_all без параметров.')
         outcome = 'management_done'

@@ -15,7 +15,7 @@ from app.adapters.max.client import MaxClient, MaxAPIError
 from app.storage.inbox import InboxStore, InboxSchemaError
 from app.storage.delivery_lock import DeliveryLock, DeliveryBusy
 
-TYPES=['message_created','message_callback']
+TYPES=['message_created','message_callback','bot_added','bot_removed']
 
 
 def digest(value):

@@ -11,7 +11,7 @@ from app.config import ConfigError
 from app.services.delivery import enqueue_cards, clip
 from app.services.roles import bootstrap_roles, has_role, change_role, reassign, ManagementError
 from app.services.preferences import bootstrap_preferences, get_timeout, set_timeout, change_words, is_ignored
-from app.services import daily_digest, notices, autoclean, navigation, request_view, admin_requests, staff_menu
+from app.services import daily_digest, notices, autoclean, navigation, request_view, admin_requests, staff_menu, broadcasts
 from app.services.reminders import configure, read_settings, describe, enqueue_reminders
 from app.services.statistics import period_bounds, read_statistics, render_statistics
 
@@ -74,7 +74,7 @@ class InboxProcessor:
             bootstrap_roles(conn, self.policy)
             bootstrap_preferences(conn, self.policy.timeout_seconds)
             rows = conn.execute("""SELECT id,payload_json,received_at FROM inbox_events
-                WHERE processed_at IS NULL AND update_type IN ('message_created','message_callback')
+                WHERE processed_at IS NULL AND update_type IN ('message_created','message_callback','bot_added','bot_removed')
                 ORDER BY id LIMIT ?""", (limit,)).fetchall()
             for event_id, payload, received_at in rows:
                 outcome = self._handle(conn, event_id, payload, received_at)
@@ -83,13 +83,14 @@ class InboxProcessor:
             # Drain received messages before expiring waits: a queued specialist
             # response must be able to cancel them, even across batch boundaries.
             backlog = conn.execute("""SELECT 1 FROM inbox_events WHERE processed_at IS NULL
-                AND update_type IN ('message_created','message_callback') LIMIT 1""").fetchone() is not None
+                AND update_type IN ('message_created','message_callback','bot_added','bot_removed') LIMIT 1""").fetchone() is not None
             promoted = 0
             if not backlog:
                 promoted = conn.execute("""UPDATE requests SET status='new'
                     WHERE status='waiting' AND due_at_ms<=?""", (now_ms,)).rowcount
             enqueue_cards(conn, self.policy.work_chat, now_ms=now_ms, timezone=self.policy.timezone)
             if not backlog:
+                broadcasts.enqueue(conn, self.policy.work_chat, now_ms)
                 enqueue_reminders(conn, self.policy.work_chat, self.policy.timezone, now_ms)
                 daily_digest.enqueue_daily(conn, self.policy.work_chat, self.policy.timezone, now_ms)
                 autoclean.enqueue_cleanup(conn, self.policy.timezone, now_ms)
@@ -97,6 +98,9 @@ class InboxProcessor:
 
     def _handle(self, conn, event_id, payload, received_at):
         event = json.loads(payload)
+        broadcasts.remember_chat(conn, event)
+        if event.get('update_type') in ('bot_added', 'bot_removed'):
+            return 'broadcast_chat_updated'
         from app.services.user_names import remember
         source = event.get('callback') if event.get('update_type') == 'message_callback' else event.get('message')
         if isinstance(source, dict):

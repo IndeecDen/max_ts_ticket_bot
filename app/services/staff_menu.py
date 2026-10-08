@@ -24,7 +24,7 @@ ACTIONS = {
     'done': ('✅ Завершить', '', 'Введите номер своей заявки в работе.'),
     'assign': ('👤 Назначить / переназначить', '/assign_request', 'Введите номер заявки и MAX ID специалиста: 12 123456.'),
     'cancel': ('✖ Отменить заявку', '/cancel_request', 'Введите номер заявки и причину отмены: 12 Дубликат обращения.'),
-    'close_all': ('✅ Закрыть все', '/close_all', ''),
+    'close_all': ('🔒 Закрыть все', '/close_all', ''),
     'roles': ('👥 Список сотрудников', '/roles', ''),
     'grant': ('➕ Выдать роль', '/role_grant', 'Введите роль specialist или admin и MAX ID: specialist 123456.'),
     'revoke': ('➖ Отозвать роль', '/role_revoke', 'Введите роль specialist или admin и MAX ID: specialist 123456.'),
@@ -48,7 +48,7 @@ STAFF = {'open', 'unassigned', 'mine', 'request', 'take', 'done', 'whoami'}
 SECTIONS = {
     'requests': ('📋 Заявки', ['open', 'unassigned', 'mine', 'request', 'take', 'done', 'assign', 'cancel', 'close_all']),
     'team': ('👥 Сотрудники и роли', ['roles', 'grant', 'revoke']),
-    'settings': ('⚙ Настройки обращений', ['timeout', 'set_timeout', 'ignore', 'add_ignore', 'del_ignore']),
+    'settings': ('⚙ Настройки обращений', ['open', 'close_all', 'timeout', 'set_timeout', 'ignore', 'add_ignore', 'del_ignore']),
     'announcements': ('📢 Объявления', ['notices', 'set_notice', 'del_notice']),
     'schedules': ('🗓 Расписания', ['reminder', 'set_reminder', 'digest', 'set_digest', 'clean', 'set_clean']),
 }
@@ -94,6 +94,7 @@ def screen(conn, key, actor, chat, section='home', *, force_new=False):
         buttons = [('📋 Заявки', 'requests'), ('📊 Статистика', 'stats')]
         if admin:
             buttons += [(SECTIONS[s][0], s) for s in ('team', 'settings', 'announcements', 'schedules')]
+            buttons += [('📣 Рассылки', 'broadcasts')]
         buttons += [('🪪 Мои ID', 'whoami'), ('❔ Помощь', 'help')]
     elif section == 'stats':
         text = '📊 Статистика\nВыберите период и формат отчёта. Личная статистика относится к вашим завершённым заявкам.'
@@ -126,6 +127,9 @@ def execute(conn, key, actor, chat, action, arguments, received_at, processor):
     if not allowed(conn, actor, action):
         clear(conn, actor, chat)
         return 'forbidden_management'
+    if action.startswith('broadcast'):
+        from app.services import broadcasts
+        return broadcasts.handle(conn, key, actor, chat, action, arguments, processor.policy)
     policy = replace(processor.policy, work_chat=chat, client_chats=processor.policy.client_chats - {chat})
     if re.fullmatch(r'(open|unassigned|mine):[1-9][0-9]{0,6}', action):
         action, arguments = action.split(':')
@@ -171,6 +175,8 @@ def execute(conn, key, actor, chat, action, arguments, received_at, processor):
 
 def result(conn, key, actor, chat, action, arguments, received_at, processor):
     outcome = execute(conn, key, actor, chat, action, arguments, received_at, processor)
+    if action.startswith('broadcast'):
+        return outcome
     if not outcome.endswith('rejected'):
         clear(conn, actor, chat)
     buttons = []
@@ -238,6 +244,8 @@ def callback(conn, key, event, received_at, processor):
                  ('answer:' + data['callback_id'], chat, data['callback_id']))
     if action in ('home', 'stats', 'help', *SECTIONS):
         return screen(conn, key, actor, chat, action)
+    if action.startswith('broadcast'):
+        return result(conn, key, actor, chat, action, '', received_at, processor)
     if action == 'close_all':
         return result(conn, key, actor, chat, action, '', received_at, processor)
     prompt = ('Введите начальную и конечную даты: 2026-10-01 2026-10-31.'
