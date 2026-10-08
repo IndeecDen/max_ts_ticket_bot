@@ -35,7 +35,7 @@ class ReleaseBundleTests(unittest.TestCase):
             for name in archive.namelist():
                 self.assertNotIn(b'SECRET', archive.read(name))
             manifest = json.loads(archive.read('max-ts-ticket-bot-1.0.1/SOURCE_MANIFEST.json'))
-            self.assertEqual(manifest['status'], 'candidate')
+            self.assertEqual(manifest['status'], 'release')
 
     def test_reproducible_and_lf_normalized(self):
         first, second = Path(self.temp.name) / 'a.zip', Path(self.temp.name) / 'b.zip'

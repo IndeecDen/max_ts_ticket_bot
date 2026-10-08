@@ -1,4 +1,4 @@
-"""Build a deterministic source candidate, excluding runtime files and secrets."""
+"""Build a deterministic source release, excluding runtime files and secrets."""
 import argparse
 import hashlib
 import json
@@ -53,7 +53,7 @@ def build(root, output, version):
         name = path.relative_to(root).as_posix()
         # Text files use LF even when the working checkout is on Windows.
         contents[name] = path.read_text(encoding='utf-8').replace('\r\n', '\n').encode('utf-8')
-    manifest = {'version': version, 'status': 'candidate',
+    manifest = {'version': version, 'status': 'release',
                 'files': {name: hashlib.sha256(data).hexdigest() for name, data in contents.items()}}
     contents['SOURCE_MANIFEST.json'] = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +85,7 @@ def main():
     except (OSError, ValueError):
         print('Сборка не завершена. Проверьте исходники и новый путь результата; существующие файлы не перезаписываются.')
         return 1
-    print(f'Кандидат собран: {args.output}\nSHA-256: {digest}\nПроверка сервера и публикация релиза выполняются отдельно.')
+    print(f'Архив собран: {args.output}\nSHA-256: {digest}\nПроверка сервера и публикация релиза выполняются отдельно.')
     return 0
 
 
